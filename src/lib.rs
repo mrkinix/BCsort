@@ -1,7 +1,7 @@
 use rayon::prelude::*;
 
-// Tune this based on your hardware. 100_000 is a safe starting point.
-const PARALLEL_THRESHOLD: usize = 100_000;
+// Tune this based on your hardware. 10_000 is a safe starting point.
+const PARALLEL_THRESHOLD: usize = 10_000;
 
 pub fn bcsort(arr: &mut [f64]) {
     let len = arr.len();
@@ -25,12 +25,7 @@ pub fn bcsort(arr: &mut [f64]) {
 
 fn bcsort_recursive_par(arr: &mut [f64]) {
     let len = arr.len();
-    
-    // MICRO SCALE: Standard Sort
-    if len <= 32 {
-        arr.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-        return;
-    }
+
 
     // MESO SCALE: If chunk is small enough, drop to single-threaded BcSort 
     // to avoid thread-thrashing. (Assume bcsort_recursive from previous iteration exists here)
