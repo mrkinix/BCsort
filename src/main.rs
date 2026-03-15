@@ -3,8 +3,6 @@ use bcsort::bcsort;
 use std::time::Instant;
 use rayon::prelude::*;
 
-// Assuming your bcsort and bcsort_recursive_par are in the same scope or imported
-// mod bcsort_module; use bcsort_module::bcsort;
 
 fn main() {
     // Note: 1B f64s = 8GB RAM. Ensure your system has ~16GB+ to run the full suite safely.
