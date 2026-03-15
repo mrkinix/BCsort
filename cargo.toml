@@ -1,0 +1,10 @@
+[package]
+name = "bcsort"
+version = "0.1.0"
+edition = "2021"
+authors = ["Hédi Ben Chiboub"]
+description = "A fast, statistical, in-place ternary distribution sort."
+
+[dependencies]
+rand = "0.8"
+rayon = "1.10"
