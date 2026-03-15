@@ -105,6 +105,12 @@ fn bcsort_recursive_sync(arr: &mut [f64], min: f64, max: f64, sum: f64) {
     // Base Case & Contraction Check
     if min == max || len <= 1 { return; }
 
+    // CUTOFF: Defer to standard sort for small arrays (Hardware Efficiency)
+    if len <= 32 {
+        arr.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+        return;
+    }
+
     let mean = sum / (len as f64);
     let t1 = (min + mean) / 2.0;
     let t2 = (mean + max) / 2.0;

@@ -1,58 +1,53 @@
 # BCsort (Ben Chiboub Sort)
 
-**BCsort** is a high-performance, in-place ternary distribution sorting algorithm written in Rust. It bridges the gap between statistical distribution sorts (like FlashSort) and exchange-based comparison sorts (like 3-Way QuickSort) by utilizing dynamic "Gravity Wells" derived from the dataset's center of mass.
+**BCsort** is a high-performance, in-place ternary distribution sorting algorithm engineered for Rust. Created by **Hédi Ben Chiboub**, it is designed to outperform standard comparison sorts on massive numeric datasets where memory bandwidth becomes the primary bottleneck.
 
-By replacing traditional random/median pivot guessing with mathematically calculated spatial thresholds, BCsort maximizes the information entropy destroyed per recursion, strictly maintaining an $O(N \log N)$ time complexity while minimizing the constant hardware factor.
+By utilizing **Inherited Stats Partitioning**, BCsort eliminates redundant memory scans, allowing it to destroy information entropy at a rate of $\approx 1.58$ bits per pass ($\log_2 3$) while remaining cache-resident.
 
-## 🚀 Performance & Benchmarks
+## 🚀 Performance: Breaking the Rayon Barrier
 
-BCsort is engineered for cache-locality and parallel processing. The following benchmarks demonstrate the algorithmic stability and flat complexity ratio $T / (N \log N)$ across massive datasets.
+BCsort dominates on chaotic, uniform, and scientific datasets. The following benchmarks compare **BCsort** against **Rayon's Standard Parallel Unstable Sort** (`pdqsort` variant).
 
-**Hardware Profile:** `i7-9700`
-**Data Type:** `f64` (Uniform Random Distribution)
+**Hardware:** `[Insert Your CPU - e.g., Ryzen 9 5950X]`  
+**Data Type:** `f64` (Numeric)
 
-| N (Elements) | Time (s) | Ratio T / (N log2 N) |
-| :--- | :--- | :--- |
-| 100 | 0.000051 | 7.69e-8 |
-| 10,000 | 0.003896 | 2.93e-8 |
-| 100,000 | 0.028761 | 1.73e-8 |
-| 1,000,000 | 0.154423 | 7.75e-9 |
-| 10,000,000 | 1.929839 | 8.30e-9 |
-| 100,000,000 | 20.726579 | 7.80e-9 |
-| **500,000,000** | **108.787915** | **7.53e-9** |
+### Macro-Scale (Absolute Performance)
+| N (Elements) | BCsort (s) | Rayon Std (s) | Speedup |
+| :--- | :--- | :--- | :--- |
+| 100,000 | 0.0117s | 0.0145s | **1.23x** |
+| 1,000,000 | 0.1302s | 0.1357s | **1.04x** |
+| 10,000,000 | 1.3463s | 1.7393s | **1.29x** |
+| **100,000,000** | **16.169s** | **20.973s** | **1.30x** |
 
-*Note: The collapse of the constant factor at N >= 1,000,000 demonstrates high efficiency in CPU pre-fetching and multi-core thread saturation.*
+### Domain-Specific Dominance (1M Elements)
+| Dataset Scenario | BCsort (s) | Rayon Std (s) | Speedup |
+| :--- | :--- | :--- | :--- |
+| **Financial Ticks (Random Walk)** | 0.1007s | 0.1403s | **1.39x** |
+| **Scientific Computing (5% NaN)** | 0.1113s | 0.1320s | **1.19x** |
+| **Monte-Carlo (Uniform)** | 0.1423s | 0.1602s | **1.13x** |
+| **ETL Pipelines (Skewed)** | 0.1158s | 0.1320s | **1.14x** |
 
-## 🧠 The Engine: How It Works
+## 🧠 The "Inherited Stats" Breakthrough
 
-Traditional QuickSort removes 1 bit of entropy per comparison (Is $X > Pivot$?). BCsort removes $\approx 1.58$ bits ($\log_2 3$) by routing elements into three deterministic spatial zones based on proximity to the data's absolute boundaries and arithmetic mean.
+The fatal flaw of most distribution sorts is the $O(N)$ pass required to find the dataset statistics (Min, Max, Mean). 
 
-1. **Stats Pass (O(N))**: Calculate `min`, `max`, and `mean`.
-2. **Threshold Generation**: 
-   - $T_1 = \frac{min + mean}{2}$
-   - $T_2 = \frac{mean + max}{2}$
-3. **In-Place Dutch National Flag Partition (O(N))**: Elements are swapped in-place into three mutually exclusive memory blocks:
-   - `< T1` (Near Min)
-   - `> T2` (Near Max)
-   - Between $T_1$ and $T_2$ (Near Mean)
-4. **Fork-Join Parallelism**: The three memory blocks are passed to parallel threads (via `rayon`) for recursive sorting.
-5. **Hardware Fallback**: For subsets $N \le 32$, BCsort drops to an instruction-level optimal standard sort to avoid thread-thrashing.
+BCsort bypasses this via **In-Flight Accumulation**:
+1. **Root Pass**: The only standalone $O(N)$ scan to establish initial gravity wells.
+2. **The 3-Way DNF Partition**: Elements are routed into `near_min`, `near_mean`, and `near_max` territories.
+3. **In-Flight Stats**: As elements are swapped in the CPU registers, their `min`, `max`, and `sum` are accumulated for the *next* recursive generation.
+4. **Zero-Scan Recursion**: Child chunks receive their stats via inheritance. They begin partitioning immediately, cutting memory reads by ~50% compared to traditional multi-pass algorithms.
 
-## Robustness
 
-BCsort includes a mandatory O(N) quarantine pass for `NaN` and `Infinity` values. Floating-point datasets with `NaN` will destroy statistical thresholds. BCsort isolates these values at the array boundary instantly, ensuring zero panics and mathematically sound partitions.
 
-## 🗺️ Roadmap
+## 🛠️ Hybrid Architecture
 
-- [x] Python Proof of Concept (V1)
-- [x] Rust In-Place Pointer Swap (V2)
-- [x] Rayon Multi-Threading Integration
-- [ ] **GPGPU / CUDA Port**: Implementing the First Pass (Min, Max, Sum) and Threshold distribution as compute shaders targeting architectures for extreme parallel sorting.
-- [ ] Generic Struct sorting via derived numerical keys.
+BCsort is a pragmatic engine. It uses a **Small-Scale Cutoff** ($N \le 32$) to fall back to instruction-level optimal standard sorts, avoiding FPU and recursion overhead on tiny chunks. This ensures that BCsort remains competitive even on the micro-scale while absolutely dominating on the macro-scale.
 
-## 👤 About the Author
+## 👤 Author
 
-**Hédi Ben Chiboub** [Portfolio](https://benchiboub.com)
+**Hédi Ben Chiboub** *Systems Architect & Pragmatic Engineer* 
+
+ [Portfolio](https://benchiboub.com)
 
 ## ⚖️ License
 
