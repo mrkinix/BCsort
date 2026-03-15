@@ -21,17 +21,17 @@ BCsort is engineered for cache-locality and parallel processing. The following b
 | 100,000,000 | 20.726579 | 7.80e-9 |
 | **500,000,000** | **108.787915** | **7.53e-9** |
 
-*Note: The collapse of the constant factor at $N \ge 1,000,000$ demonstrates high efficiency in CPU pre-fetching and multi-core thread saturation.*
+*Note: The collapse of the constant factor at N >= 1,000,000 demonstrates high efficiency in CPU pre-fetching and multi-core thread saturation.*
 
 ## 🧠 The Engine: How It Works
 
 Traditional QuickSort removes 1 bit of entropy per comparison (Is $X > Pivot$?). BCsort removes $\approx 1.58$ bits ($\log_2 3$) by routing elements into three deterministic spatial zones based on proximity to the data's absolute boundaries and arithmetic mean.
 
-1. **Stats Pass ($O(N)$)**: Calculate `min`, `max`, and `mean`.
+1. **Stats Pass (O(N))**: Calculate `min`, `max`, and `mean`.
 2. **Threshold Generation**: 
    - $T_1 = \frac{min + mean}{2}$
    - $T_2 = \frac{mean + max}{2}$
-3. **In-Place Dutch National Flag Partition ($O(N)$)**: Elements are swapped in-place into three mutually exclusive memory blocks:
+3. **In-Place Dutch National Flag Partition (O(N))**: Elements are swapped in-place into three mutually exclusive memory blocks:
    - `< T1` (Near Min)
    - `> T2` (Near Max)
    - Between $T_1$ and $T_2$ (Near Mean)
@@ -40,7 +40,7 @@ Traditional QuickSort removes 1 bit of entropy per comparison (Is $X > Pivot$?).
 
 ## Robustness
 
-BCsort includes a mandatory $O(N)$ quarantine pass for `NaN` and `Infinity` values. Floating-point datasets with `NaN` will destroy statistical thresholds. BCsort isolates these values at the array boundary instantly, ensuring zero panics and mathematically sound partitions.
+BCsort includes a mandatory O(N) quarantine pass for `NaN` and `Infinity` values. Floating-point datasets with `NaN` will destroy statistical thresholds. BCsort isolates these values at the array boundary instantly, ensuring zero panics and mathematically sound partitions.
 
 ## 🗺️ Roadmap
 
