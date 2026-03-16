@@ -6,5 +6,11 @@ authors = ["Hédi Ben Chiboub"]
 description = "A fast, statistical, in-place ternary distribution sort."
 
 [dependencies]
+rayon = "1"
 rand = "0.8"
-rayon = "1.10"
+radsort = "0.1.1"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1

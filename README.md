@@ -1,54 +1,52 @@
 # BCsort (Ben Chiboub Sort)
 
-**BCsort** is a high-performance, in-place ternary distribution sorting algorithm engineered for Rust. Created by **Hédi Ben Chiboub**, it is designed to outperform standard comparison sorts on massive numeric datasets where memory bandwidth becomes the primary bottleneck.
+**BCsort** is an experimental, high-performance, in-place ternary distribution sort engineered in Rust. Created by **Hédi Ben Chiboub**, it explores a novel "Continuous-Space Spatial Partitioning" approach to numeric sorting. 
 
-By utilizing **Inherited Stats Partitioning**, BCsort eliminates redundant memory scans, allowing it to destroy information entropy at a rate of $\approx 1.58$ bits per pass ($\log_2 3$) while remaining cache-resident.
+Instead of traditional median-pivot guessing (like QuickSort) or bitwise bucketing (like Radix Sort), BCsort calculates the spatial bounding box of the data and geometrically bisects it, routing elements into dynamically scaling "Gravity Wells."
 
-## 🚀 Performance: Breaking the Rayon Barrier
+## 🚀 The Goal: Combating the Memory Wall
 
-BCsort dominates on chaotic, uniform, and scientific datasets. The following benchmarks compare **BCsort** against **Rayon's Standard Parallel Unstable Sort** (`pdqsort` variant).
+While standard parallel comparison sorts (like Rayon's `pdqsort`) dominate in raw ALU instruction efficiency, they ignore spatial value distribution. Conversely, $O(N)$ Radix sorts are incredibly fast but require massive $O(N)$ auxiliary memory buffers.
 
-**Hardware:** `[Insert Your CPU - e.g., Ryzen 9 5950X]`  
-**Data Type:** `f64` (Numeric)
+**BCsort bridges this gap.** By strictly maintaining an in-place $O(1)$ memory footprint, BCsort leverages L2/L3 cache locality to match the speed of linear-time Radix sorts on massive datasets without the RAM allocation penalty.
 
-### Macro-Scale (Absolute Performance)
-| N (Elements) | BCsort (s) | Rayon Std (s) | Speedup |
-| :--- | :--- | :--- | :--- |
-| 100,000 | 0.0117s | 0.0145s | **1.23x** |
-| 1,000,000 | 0.1302s | 0.1357s | **1.04x** |
-| 10,000,000 | 1.3463s | 1.7393s | **1.29x** |
-| **100,000,000** | **16.169s** | **20.973s** | **1.30x** |
+## 📊 Benchmarks (Real-World Hardware)
 
-### Domain-Specific Dominance (1M Elements)
-| Dataset Scenario | BCsort (s) | Rayon Std (s) | Speedup |
-| :--- | :--- | :--- | :--- |
-| **Financial Ticks (Random Walk)** | 0.1007s | 0.1403s | **1.39x** |
-| **Scientific Computing (5% NaN)** | 0.1113s | 0.1320s | **1.19x** |
-| **Monte-Carlo (Uniform)** | 0.1423s | 0.1602s | **1.13x** |
-| **ETL Pipelines (Skewed)** | 0.1158s | 0.1320s | **1.14x** |
+**Hardware:** `[Insert Your CPU - e.g., i7-7900]`  
+**Data Type:** `f64` (Numeric)  
+**Execution:** `cargo run --release` with AVX2 enabled (`target-cpu=native`).
 
-## 🧠 The "Inherited Stats" Breakthrough
-
-The fatal flaw of most distribution sorts is the $O(N)$ pass required to find the dataset statistics (Min, Max, Mean). 
-
-BCsort bypasses this via **In-Flight Accumulation**:
-1. **Root Pass**: The only standalone $O(N)$ scan to establish initial gravity wells.
-2. **The 3-Way DNF Partition**: Elements are routed into `near_min`, `near_mean`, and `near_max` territories.
-3. **In-Flight Stats**: As elements are swapped in the CPU registers, their `min`, `max`, and `sum` are accumulated for the *next* recursive generation.
-4. **Zero-Scan Recursion**: Child chunks receive their stats via inheritance. They begin partitioning immediately, cutting memory reads by ~50% compared to traditional multi-pass algorithms.
+| N (Elements) | BCsort | Rayon (pdqsort) | Radsort ($O(N)$) | BC vs Radsort |
+| :--- | :--- | :--- | :--- | :--- |
+| 100,000 | 0.0016s | **0.0008s** | 0.0013s | *-25%* |
+| 1,000,000 | **0.0140s** | **0.0054s** | 0.0157s | **+13% (BC Wins)** |
+| 10,000,000 | **0.1416s** | **0.0702s** | 0.1677s | **+18% (BC Wins)** |
+| 100,000,000| **1.6493s** | **0.9415s** | 1.6659s | **+1% (Tie)** |
 
 
+## 🧠 Architecture: Geometric Bisection
 
-## 🛠️ Hybrid Architecture
+1. **Root Bounds Pass**: A single parallel scan finds the absolute dataset minimum and maximum.
+2. **Theoretical Thresholds**: The spatial zone is bisected.
+   - $Mean = \frac{Min + Max}{2}$
+   - $T_1 = \frac{Min + Mean}{2}$, $T_2 = \frac{Mean + Max}{2}$
+3. **In-Place 3-Way DNF Partition**: Elements are physically routed into three contiguous memory arenas (`< T1`, `Between`, `> T2`).
+4. **Zero-Scan Recursion**: Because the spatial bounds are theoretical, child chunks inherit their bounding box mathematically. No further $O(N)$ statistical scans are required.
 
-BCsort is a pragmatic engine. It uses a **Small-Scale Cutoff** ($N \le 32$) to fall back to instruction-level optimal standard sorts, avoiding FPU and recursion overhead on tiny chunks. This ensures that BCsort remains competitive even on the micro-scale while absolutely dominating on the macro-scale.
+## ⚠️ Distribution Stress & Robustness
+
+BCsort features a strict, upfront $O(N)$ quarantine pass for `NaN` and `Infinity` values, making it highly robust for raw sensor telemetry or scientific data where standard floating-point sorts often panic.
+
+| Scenario (1M floats) | BCsort Time | Behavior Note |
+| :--- | :--- | :--- |
+| **Uniform** | 0.018s | Standard baseline |
+| **Gaussian** | 0.013s | Faster: Center-weighted bisection |
+| **Pareto (Skewed)** | 0.013s | Faster: Immediate outlier isolation |
+| **Nearly Sorted** | 0.004s | $O(N)$ collapse via contraction check |
 
 ## 👤 Author
 
-**Hédi Ben Chiboub** *Systems Architect & Pragmatic Engineer* 
-
- [Portfolio](https://benchiboub.com)
+**Hédi Ben Chiboub** *Pragmatic Systems Architect* [Portfolio](https://benchiboub.com)
 
 ## ⚖️ License
-
-Distributed under the MIT License. See `LICENSE` for more information.
+MIT License.

@@ -6,6 +6,7 @@ version = 4
 name = "bcsort"
 version = "0.1.0"
 dependencies = [
+ "radsort",
  "rand",
  "rayon",
 ]
@@ -90,6 +91,12 @@ checksum = "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "radsort"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "019b4b213425016d7d84a153c4c73afb0946fbb4840e4eece7ba8848b9d6da22"
 
 [[package]]
 name = "rand"
