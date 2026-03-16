@@ -1,6 +1,6 @@
 [package]
 name = "bcsort"
-version = "0.1.2"
+version = "0.1.0"
 edition = "2021"
 authors = ["Hédi Ben Chiboub"]
 description = "A fast, statistical, in-place ternary distribution sort."
@@ -12,6 +12,7 @@ categories = ["algorithms", "data-structures"]
 
 [dependencies]
 rayon = "1.8"
+
 
 [profile.release]
 opt-level = 3

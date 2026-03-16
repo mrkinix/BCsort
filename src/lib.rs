@@ -162,9 +162,14 @@ macro_rules! impl_bcsort_for_float {
                     return;
                 }
 
-                // CUTOFF: Defer to standard sort for small arrays (Hardware Efficiency)
-                if len <= 32 {
-                    arr.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+              if len <= 32 {
+                    for i in 1..len {
+                        let mut j = i;
+                        while j > 0 && (arr[j-1] > arr[j] || arr[j-1].is_nan()) {
+                            arr.swap(j, j-1);
+                            j -= 1;
+                        }
+                    }
                     return;
                 }
 
