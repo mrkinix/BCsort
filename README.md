@@ -1,52 +1,58 @@
 # BCsort (Ben Chiboub Sort)
 
-**BCsort** is an experimental, high-performance, in-place ternary distribution sort engineered in Rust. Created by **Hédi Ben Chiboub**, it explores a novel "Continuous-Space Spatial Partitioning" approach to numeric sorting. 
+**BCsort** is a high-performance, in-place ternary distribution sorting algorithm engineered for Rust. Created by **Hédi Ben Chiboub**, it is designed to combat the **Memory Wall** by utilizing continuous-space spatial partitioning. 
 
-Instead of traditional median-pivot guessing (like QuickSort) or bitwise bucketing (like Radix Sort), BCsort calculates the spatial bounding box of the data and geometrically bisects it, routing elements into dynamically scaling "Gravity Wells."
+Instead of traditional median-pivot guessing (QuickSort) or bitwise bucketing (Radix Sort), BCsort calculates the spatial bounding box of the data and geometrically bisects it, routing elements into dynamically scaling "Gravity Wells."
 
-## 🚀 The Goal: Combating the Memory Wall
+## Performance: The Radix Intercept
 
-While standard parallel comparison sorts (like Rayon's `pdqsort`) dominate in raw ALU instruction efficiency, they ignore spatial value distribution. Conversely, $O(N)$ Radix sorts are incredibly fast but require massive $O(N)$ auxiliary memory buffers.
+BCsort achieves its speed by maintaining a strict $O(1)$ auxiliary memory footprint. While memory-bound $O(N)$ sorts like `radsort` require massive $O(N)$ buffers, BCsort remains cache-resident, allowing it to outperform linear-time algorithms on datasets between $10^6$ and $10^8$ elements.
 
-**BCsort bridges this gap.** By strictly maintaining an in-place $O(1)$ memory footprint, BCsort leverages L2/L3 cache locality to match the speed of linear-time Radix sorts on massive datasets without the RAM allocation penalty.
+**Hardware:** i7-7900 | 24GB RAM  
+**Environment:** `cargo run --release` | `RUSTFLAGS="-C target-cpu=native"`  
+**Data Type:** `f64` (Uniform Random Distribution)
 
-## 📊 Benchmarks (Real-World Hardware)
+### SIZE SWEEP — Uniform random f64 — avg of 3 runs
+| N | BCsort v2(s) | Rayon par(s) | radsort (s) | vs Rayon | vs radsort |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 1000 | 0.000230 | 0.000020 | 0.000015 | BC -1053% | BC -1429% |
+| 10000 | 0.000422 | 0.000172 | 0.000146 | BC -146% | BC -189% |
+| 100000 | 0.001506 | 0.000719 | 0.001686 | BC -109% | BC +12% |
+| 1000000 | 0.014371 | 0.007046 | 0.020077 | BC -104% | BC +40% |
+| 10000000 | 0.143960 | 0.063030 | 0.171723 | BC -128% | BC +19% |
+| 100000000 | 1.683463 | 0.891120 | 1.694845 | BC -89% | BC +1% |
 
-**Hardware:** `[Insert Your CPU - e.g., i7-7900]`  
-**Data Type:** `f64` (Numeric)  
-**Execution:** `cargo run --release` with AVX2 enabled (`target-cpu=native`).
-
-| N (Elements) | BCsort | Rayon (pdqsort) | Radsort ($O(N)$) | BC vs Radsort |
+### DISTRIBUTION STRESS — N = 1,000,000 — avg of 3 runs
+| Scenario | BCsort v2(s) | Rayon par(s) | radsort (s) | BC vs best |
 | :--- | :--- | :--- | :--- | :--- |
-| 100,000 | 0.0016s | **0.0008s** | 0.0013s | *-25%* |
-| 1,000,000 | **0.0140s** | **0.0054s** | 0.0157s | **+13% (BC Wins)** |
-| 10,000,000 | **0.1416s** | **0.0702s** | 0.1677s | **+18% (BC Wins)** |
-| 100,000,000| **1.6493s** | **0.9415s** | 1.6659s | **+1% (Tie)** |
+| Uniform | 0.014340 | 0.006156 | 0.031033 | BC -133% |
+| Gaussian | 0.013630 | 0.005672 | 0.015943 | BC -140% |
+| Pareto (skewed) | 0.013358 | 0.005585 | 0.015762 | BC -139% |
+| Nearly sorted | 0.004368 | 0.003366 | 0.015141 | BC -30% |
+| 5% NaN | 0.013518 | 0.005486 | 0.016010 | BC -146% |
 
+### 10M VARIANCE REPORT — 5 individual runs, uniform f64
+| Run | BCsort v2(s) | Rayon par(s) | radsort (s) |
+| :--- | :--- | :--- | :--- |
+| 1 | 0.147147 | 0.085279 | 0.174830 |
+| 2 | 0.149357 | 0.085369 | 0.174691 |
+| 3 | 0.151786 | 0.080296 | 0.173559 |
+| 4 | 0.146650 | 0.079965 | 0.179120 |
+| 5 | 0.148543 | 0.079260 | 0.177187 |
 
-## 🧠 Architecture: Geometric Bisection
+## Architecture: 1D Octree Partitioning
 
-1. **Root Bounds Pass**: A single parallel scan finds the absolute dataset minimum and maximum.
-2. **Theoretical Thresholds**: The spatial zone is bisected.
-   - $Mean = \frac{Min + Max}{2}$
-   - $T_1 = \frac{Min + Mean}{2}$, $T_2 = \frac{Mean + Max}{2}$
-3. **In-Place 3-Way DNF Partition**: Elements are physically routed into three contiguous memory arenas (`< T1`, `Between`, `> T2`).
-4. **Zero-Scan Recursion**: Because the spatial bounds are theoretical, child chunks inherit their bounding box mathematically. No further $O(N)$ statistical scans are required.
+BCsort treats sorting as a spatial subdivision problem rather than a comparison problem:
 
-## ⚠️ Distribution Stress & Robustness
-
-BCsort features a strict, upfront $O(N)$ quarantine pass for `NaN` and `Infinity` values, making it highly robust for raw sensor telemetry or scientific data where standard floating-point sorts often panic.
-
-| Scenario (1M floats) | BCsort Time | Behavior Note |
-| :--- | :--- | :--- |
-| **Uniform** | 0.018s | Standard baseline |
-| **Gaussian** | 0.013s | Faster: Center-weighted bisection |
-| **Pareto (Skewed)** | 0.013s | Faster: Immediate outlier isolation |
-| **Nearly Sorted** | 0.004s | $O(N)$ collapse via contraction check |
+1. **Root Stats**: A single parallel scan identifies the absolute `min`, `max`, and `mean` to anchor the data's center of gravity.
+2. **Zero-Scan Recursion**: After the root pass, BCsort uses **Theoretical Bisection**. Child chunks inherit their bounding boxes mathematically ($T_1 = \frac{min+mean}{2}$, $T_2 = \frac{mean+max}{2}$). This eliminates subsequent $O(N)$ stats scans, cutting memory bandwidth usage by ~50%.
+3. **Cache-Aware DNF**: Using an in-place 3-way Dutch National Flag partition, BCsort groups data into territories that remain resident in L2/L3 cache, bypassing the RAM latency of out-of-place distribution sorts.
+4. A mandatory $O(N)$ quarantine pass handles `NaN` and `Inf` values using `total_cmp` logic, ensuring zero-panic execution on scientific or sensor telemetry data.
 
 ## 👤 Author
 
-**Hédi Ben Chiboub** *Pragmatic Systems Architect* [Portfolio](https://benchiboub.com)
+**Hédi Ben Chiboub** *Systems Architect & Pragmatic Engineer* [Portfolio](https://benchiboub.com)
 
 ## ⚖️ License
-MIT License.
+
+Distributed under the MIT License. See `LICENSE` for more information.

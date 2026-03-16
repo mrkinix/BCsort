@@ -1,186 +1,220 @@
-// bcsort/src/lib.rs — BCsort v4 (Pure Spatial Partitioning / Zero-Accumulation Inner Loop)
+//! BCsort: A fast, statistical, in-place ternary distribution sort.
+
 
 use rayon::prelude::*;
 
-const PARALLEL_THRESHOLD: usize = 8_000;
-const SMALL_SORT_THRESHOLD: usize = 32;
+/// Configuration for tuning BCsort performance.
+#[derive(Clone, Debug)]
+pub struct BcsortConfig {
+    /// The minimum slice length required to spawn parallel tasks. 
+    /// Can be tuned for 128-core servers vs 2-core IoT devices.
+    pub parallel_threshold: usize,
+}
 
-// ─── Public entry point ───────────────────────────────────────────────────────
-
-pub fn bcsort(arr: &mut [f64]) {
-    let len = arr.len();
-    if len <= 1 { return; }
-
-    // Quarantine NaN / Inf to the tail.
-    let mut valid_len = len;
-    let mut i = 0;
-    while i < valid_len {
-        if !arr[i].is_finite() {
-            valid_len -= 1;
-            arr.swap(i, valid_len);
-        } else {
-            i += 1;
+impl Default for BcsortConfig {
+    fn default() -> Self {
+        Self {
+            parallel_threshold: 10_000,
         }
     }
-    if valid_len <= 1 { return; }
-    let valid_arr = &mut arr[..valid_len];
+}
 
-    // ROOT STATS — The ONLY O(N) accumulation in the entire algorithm.
-    let (min, max, sum) = if valid_len >= PARALLEL_THRESHOLD * 2 {
-        stats_par(valid_arr)
-    } else {
-        stats_scalar(valid_arr)
+/// Extension trait providing in-place BCsort operations for slices.
+pub trait Bcsort {
+    /// Sorts the slice in-place using the default configuration.
+    ///
+    /// # Example
+    /// ```
+    /// use bcsort::Bcsort;
+    /// let mut data = vec![5.0, 1.0, 4.0, 2.0];
+    /// data.bcsort();
+    /// assert_eq!(data, vec![1.0, 2.0, 4.0, 5.0]);
+    /// ```
+    fn bcsort(&mut self);
+
+    /// Sorts the slice in-place using a custom configuration.
+    fn bcsort_with_config(&mut self, config: &BcsortConfig);
+}
+
+// Macro to implement BCsort for primitive float types without complex trait bounds.
+// The `const _: () = { ... }` block ensures internal helper functions don't 
+// cause namespace collisions when the macro is invoked multiple times.
+macro_rules! impl_bcsort_for_float {
+    ($t:ident) => {
+        const _: () = {
+            impl Bcsort for [$t] {
+                fn bcsort(&mut self) {
+                    self.bcsort_with_config(&BcsortConfig::default());
+                }
+
+                fn bcsort_with_config(&mut self, config: &BcsortConfig) {
+                    let len = self.len();
+                    if len <= 1 {
+                        return;
+                    }
+
+                    // 1. NaN/Inf Quarantine (Single threaded pass)
+                    let mut valid_len = len;
+                    let mut i = 0;
+                    while i < valid_len {
+                        if self[i].is_nan() || self[i].is_infinite() {
+                            valid_len -= 1;
+                            self.swap(i, valid_len);
+                        } else {
+                            i += 1;
+                        }
+                    }
+
+                    if valid_len <= 1 {
+                        return;
+                    }
+                    let valid_arr = &mut self[0..valid_len];
+
+                    // 2. ROOT MACRO SCALE
+                    let (min, max, sum) = valid_arr
+                        .par_iter()
+                        .copied()
+                        .fold(
+                            || ($t::INFINITY, $t::NEG_INFINITY, 0.0),
+                            |acc, x| (acc.0.min(x), acc.1.max(x), acc.2 + x),
+                        )
+                        .reduce(
+                            || ($t::INFINITY, $t::NEG_INFINITY, 0.0),
+                            |a, b| (a.0.min(b.0), a.1.max(b.1), a.2 + b.2),
+                        );
+
+                    bcsort_recursive_par(valid_arr, min, max, sum, config.parallel_threshold);
+                }
+            }
+
+            fn bcsort_recursive_par(arr: &mut [$t], min: $t, max: $t, sum: $t, threshold: usize) {
+                let len = arr.len();
+
+                // Base Case & Contraction Check
+                if min == max || len <= 1 {
+                    return;
+                }
+
+                // MESO SCALE: Drop to single-threaded BcSort to avoid thread-thrashing.
+                if len < threshold {
+                    bcsort_recursive_sync(arr, min, max, sum);
+                    return;
+                }
+
+                let mean = sum / (len as $t);
+                let t1 = (min + mean) / 2.0;
+                let t2 = (mean + max) / 2.0;
+
+                let mut low = 0;
+                let mut mid = 0;
+                let mut high = len;
+
+                // Inherited Trackers for the next generation
+                let mut min_l = $t::INFINITY; let mut max_l = $t::NEG_INFINITY; let mut sum_l = 0.0;
+                let mut min_m = $t::INFINITY; let mut max_m = $t::NEG_INFINITY; let mut sum_m = 0.0;
+                let mut min_r = $t::INFINITY; let mut max_r = $t::NEG_INFINITY; let mut sum_r = 0.0;
+
+                // SECOND PASS: In-Place Dutch National Flag Partition + In-Flight Accumulation
+                while mid < high {
+                    let val = arr[mid];
+
+                    if val < t1 {
+                        min_l = min_l.min(val); max_l = max_l.max(val); sum_l += val;
+                        arr.swap(low, mid);
+                        low += 1;
+                        mid += 1;
+                    } else if val > t2 {
+                        high -= 1;
+                        min_r = min_r.min(val); max_r = max_r.max(val); sum_r += val;
+                        arr.swap(mid, high);
+                    } else {
+                        min_m = min_m.min(val); max_m = max_m.max(val); sum_m += val;
+                        mid += 1;
+                    }
+                }
+
+                // SAFETY FALLBACK
+                if low == len || (high - low) == len || (len - high) == len {
+                    arr.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+                    return;
+                }
+
+                let (left, rest) = arr.split_at_mut(low);
+                let (middle, right) = rest.split_at_mut(high - low);
+
+                // Fork-Join with inherited stats
+                rayon::join(
+                    || bcsort_recursive_par(left, min_l, max_l, sum_l, threshold),
+                    || {
+                        rayon::join(
+                            || bcsort_recursive_par(middle, min_m, max_m, sum_m, threshold),
+                            || bcsort_recursive_par(right, min_r, max_r, sum_r, threshold),
+                        )
+                    },
+                );
+            }
+
+            fn bcsort_recursive_sync(arr: &mut [$t], min: $t, max: $t, sum: $t) {
+                let len = arr.len();
+
+                // Base Case & Contraction Check
+                if min == max || len <= 1 {
+                    return;
+                }
+
+                // CUTOFF: Defer to standard sort for small arrays (Hardware Efficiency)
+                if len <= 32 {
+                    arr.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+                    return;
+                }
+
+                let mean = sum / (len as $t);
+                let t1 = (min + mean) / 2.0;
+                let t2 = (mean + max) / 2.0;
+
+                let mut low = 0;
+                let mut mid = 0;
+                let mut high = len;
+
+                // Inherited Trackers for the next generation
+                let mut min_l = $t::INFINITY; let mut max_l = $t::NEG_INFINITY; let mut sum_l = 0.0;
+                let mut min_m = $t::INFINITY; let mut max_m = $t::NEG_INFINITY; let mut sum_m = 0.0;
+                let mut min_r = $t::INFINITY; let mut max_r = $t::NEG_INFINITY; let mut sum_r = 0.0;
+
+                // In-Place Dutch National Flag Partition + In-Flight Accumulation
+                while mid < high {
+                    let val = arr[mid];
+
+                    if val < t1 {
+                        min_l = min_l.min(val); max_l = max_l.max(val); sum_l += val;
+                        arr.swap(low, mid);
+                        low += 1;
+                        mid += 1;
+                    } else if val > t2 {
+                        high -= 1;
+                        min_r = min_r.min(val); max_r = max_r.max(val); sum_r += val;
+                        arr.swap(mid, high);
+                    } else {
+                        min_m = min_m.min(val); max_m = max_m.max(val); sum_m += val;
+                        mid += 1;
+                    }
+                }
+
+                // SAFETY FALLBACK: If partition fails to divide (Skew trap)
+                if low == len || (high - low) == len || (len - high) == len {
+                    arr.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+                    return;
+                }
+
+                // RECURSIVE BOOM
+                bcsort_recursive_sync(&mut arr[0..low], min_l, max_l, sum_l);
+                bcsort_recursive_sync(&mut arr[low..high], min_m, max_m, sum_m);
+                bcsort_recursive_sync(&mut arr[high..len], min_r, max_r, sum_r);
+            }
+        };
     };
-
-    if min == max { return; }
-
-    // Calculate the TRUE root thresholds
-    let root_mean = sum / valid_len as f64;
-    let t1 = (min + root_mean) / 2.0;
-    let t2 = (root_mean + max) / 2.0;
-
-    // First partition using true stats
-    let (low, high) = partition_inplace(valid_arr, t1, t2);
-
-    if low == valid_len || (high - low) == valid_len || (valid_len - high) == valid_len {
-        valid_arr.par_sort_unstable_by(|a, b| a.total_cmp(b));
-        return;
-    }
-
-    let (left, rest) = valid_arr.split_at_mut(low);
-    let (middle, right) = rest.split_at_mut(high - low);
-
-    // Fork-Join passing THEORETICAL BOUNDS
-    rayon::join(
-        || bcsort_par(left, min, t1),
-        || rayon::join(
-            || bcsort_par(middle, t1, t2),
-            || bcsort_par(right, t2, max),
-        ),
-    );
 }
 
-// ─── Stats helpers ────────────────────────────────────────────────────────────
-
-#[inline(always)]
-fn stats_scalar(arr: &[f64]) -> (f64, f64, f64) {
-    let mut mn = f64::INFINITY;
-    let mut mx = f64::NEG_INFINITY;
-    let mut s  = 0.0_f64;
-    for &x in arr {
-        mn = mn.min(x);
-        mx = mx.max(x);
-        s += x;
-    }
-    (mn, mx, s)
-}
-
-fn stats_par(arr: &[f64]) -> (f64, f64, f64) {
-    arr.par_iter()
-        .copied()
-        .fold(
-            || (f64::INFINITY, f64::NEG_INFINITY, 0.0_f64),
-            |acc, x| (acc.0.min(x), acc.1.max(x), acc.2 + x),
-        )
-        .reduce(
-            || (f64::INFINITY, f64::NEG_INFINITY, 0.0_f64),
-            |a, b| (a.0.min(b.0), a.1.max(b.1), a.2 + b.2),
-        )
-}
-
-// ─── Parallel layer ───────────────────────────────────────────────────────────
-
-fn bcsort_par(arr: &mut [f64], b_min: f64, b_max: f64) {
-    let len = arr.len();
-    if len <= 1 { return; }
-    if len < PARALLEL_THRESHOLD {
-        bcsort_sync(arr, b_min, b_max);
-        return;
-    }
-
-    // GEOMETRIC BISECTION: We derive the mean and thresholds purely from the bounding box.
-    let mean = (b_min + b_max) / 2.0;
-    let t1 = (b_min + mean) / 2.0;
-    let t2 = (mean + b_max) / 2.0;
-
-    let (low, high) = partition_inplace(arr, t1, t2);
-
-    // SAFETY GUARD: If theoretical bounds fail to split the empirical data, delegate to hardware sort.
-    if low == len || (high - low) == len || (len - high) == len {
-        arr.par_sort_unstable_by(|a, b| a.total_cmp(b));
-        return;
-    }
-
-    let (left, rest) = arr.split_at_mut(low);
-    let (middle, right) = rest.split_at_mut(high - low);
-
-    rayon::join(
-        || bcsort_par(left, b_min, t1),
-        || rayon::join(
-            || bcsort_par(middle, t1, t2),
-            || bcsort_par(right, t2, b_max),
-        ),
-    );
-}
-
-// ─── Single-threaded layer ────────────────────────────────────────────────────
-
-fn bcsort_sync(arr: &mut [f64], b_min: f64, b_max: f64) {
-    let len = arr.len();
-    if len <= SMALL_SORT_THRESHOLD {
-        arr.sort_unstable_by(|a, b| a.total_cmp(b));
-        return;
-    }
-
-    let mean = (b_min + b_max) / 2.0;
-    let t1 = (b_min + mean) / 2.0;
-    let t2 = (mean + b_max) / 2.0;
-
-    let (low, high) = partition_inplace(arr, t1, t2);
-
-    if low == len || (high - low) == len || (len - high) == len {
-        arr.sort_unstable_by(|a, b| a.total_cmp(b));
-        return;
-    }
-
-    bcsort_sync(&mut arr[..low], b_min, t1);
-    bcsort_sync(&mut arr[low..high], t1, t2);
-    bcsort_sync(&mut arr[high..], t2, b_max);
-}
-
-// ─── Core partition ───────────────────────────────────────────────────────────
-//
-// Pure data movement. Zero accumulation.
-#[inline(always)]
-fn partition_inplace(arr: &mut [f64], t1: f64, t2: f64) -> (usize, usize) {
-    let len = arr.len();
-    let mut low  = 0;
-    let mut mid  = 0;
-    let mut high = len;
-
-    while mid < high {
-        // SAFETY: mid < high <= len ensures mid is within bounds.
-        let val = unsafe { *arr.get_unchecked(mid) };
-
-        if val < t1 {
-            unsafe {
-                let p_low = arr.as_mut_ptr().add(low);
-                let p_mid = arr.as_mut_ptr().add(mid);
-                std::ptr::swap(p_low, p_mid);
-            }
-            low += 1;
-            mid += 1;
-        } else if val > t2 {
-            high -= 1;
-            unsafe {
-                let p_mid  = arr.as_mut_ptr().add(mid);
-                let p_high = arr.as_mut_ptr().add(high);
-                std::ptr::swap(p_mid, p_high);
-            }
-        } else {
-            mid += 1;
-        }
-    }
-
-    (low, high)
-}
+// Generate implementation for both f32 and f64
+impl_bcsort_for_float!(f32);
+impl_bcsort_for_float!(f64);
