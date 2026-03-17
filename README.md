@@ -45,13 +45,16 @@ BCsort beats radsort from 100K elements upward. radsort is O(N) but requires an 
 
 ### Distribution stress — N = 1,000,000 — avg of 3 runs
 
-| Scenario | BCsort (s) | Rayon par (s) | radsort (s) | BC vs best |
-| :--- | :--- | :--- | :--- | :--- |
-| Uniform | 0.014610 | 0.005696 | 0.017911 | BC -157% |
-| Gaussian | 0.015569 | 0.005583 | 0.017281 | BC -179% |
-| Pareto (skewed) | 0.015634 | 0.005867 | 0.017967 | BC -166% |
-| Nearly sorted | 0.006817 | 0.003280 | 0.016605 | BC -108% |
-| 5% NaN | 0.014286 | 0.006362 | 0.018426 | BC -125% |
+
+| Scenario | BCsort v2 (s) | Rayon par (s) | radsort (s) | BC vs Best (Rayon) | BC vs radsort |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Uniform** | 0.014610 | 0.005696 | 0.017911 | BC -157% | **BC +22%** |
+| **Gaussian** | 0.015569 | 0.005583 | 0.017281 | BC -179% | **BC +11%** |
+| **Pareto (skewed)** | 0.015634 | 0.005867 | 0.017967 | BC -166% | **BC +15%** |
+| **Nearly sorted** | 0.006817 | 0.003280 | 0.016605 | BC -108% | **BC +143%** |
+| **5% NaN** | 0.014286 | 0.006362 | 0.018426 | BC -125% | **BC +29%** |
+
+> **Technical Note:** BCsort v2 utilizes a SIMD-accelerated partitioning logic that quarantines NaNs and Infs to the tail of the array, ensuring that the primary sort pipeline remains free of branch-heavy floating-point checks.
 
 The Pareto result is notable — heavily skewed data is where mean-based partitioning typically degrades. The adaptive pivot mechanism keeps it within range of the uniform case.
 
