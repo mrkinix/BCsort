@@ -1,6 +1,6 @@
 [package]
 name = "bcsort"
-version = "0.1.4"
+version = "0.1.3"
 edition = "2021"
 authors = ["Hédi Ben Chiboub"]
 description = "A fast, statistical, in-place ternary distribution sort."
